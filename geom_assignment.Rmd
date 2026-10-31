@@ -1,0 +1,126 @@
+---
+title: "Assignment: ggplot2 geom functions"
+author: "SANGO Melissa"
+date: "2026-10-31"
+output: html_document
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+# install.packages("ggplot2")
+library(ggplot2)
+data(iris)
+```
+
+## The data
+
+The `iris` dataset has 150 flowers from 3 species, with 4 measurements each.
+
+```{r data}
+head(iris)
+str(iris)
+```
+## 1. geom_bar(): count of flowers per species
+
+```{r bar}
+ggplot(iris, aes(x = Species)) + geom_bar(fill = "steelblue")
+```
+
+Each species has 50 flowers, so the bars have equal height.
+
+## 2. geom_boxplot(): sepal length by species
+
+```{r boxplot}
+ggplot(iris, aes(x = Species, y = Sepal.Length)) + geom_boxplot()
+```
+
+Virginica has the highest median sepal length; setosa has the lowest.
+
+## 3. geom_density(): distribution of petal length
+
+```{r density}
+ggplot(iris, aes(x = Petal.Length, fill = Species)) +
+  geom_density(alpha = 0.5)
+```
+
+## 4. geom_histogram(): distribution of sepal length
+
+```{r histogram}
+ggplot(iris, aes(x = Sepal.Length)) +
+  geom_histogram(binwidth = 0.3, fill = "blue", color = "white")
+```
+
+## 5. geom_hline(): horizontal reference line at the mean
+
+```{r hline}
+ggplot(iris, aes(x = Species, y = Sepal.Length)) +
+  geom_point() +
+  geom_hline(yintercept = mean(iris$Sepal.Length), color = "red")
+```
+
+The red line is the overall mean sepal length.
+
+## 6. geom_jitter(): points spread out to avoid overlap
+
+```{r jitter}
+ggplot(iris, aes(x = Species, y = Sepal.Length)) +
+  geom_jitter(width = 0.2)
+```
+
+## 7. geom_point(): scatter plot
+
+```{r point}
+ggplot(iris, aes(x = Sepal.Length, y = Petal.Length, color = Species)) +
+  geom_point()
+```
+
+Petal length increases with sepal length, and the species form clear groups.
+
+## 8. geom_rug(): marks along the axes
+
+```{r rug}
+ggplot(iris, aes(x = Sepal.Length, y = Petal.Length)) +
+  geom_point() +
+  geom_rug()
+```
+
+## 9. geom_smooth(): trend line
+
+```{r smooth, message=FALSE}
+ggplot(iris, aes(x = Sepal.Length, y = Petal.Length)) +
+  geom_point() +
+  geom_smooth()
+```
+
+## 10. geom_text(): labels on the plot
+
+```{r text}
+means <- aggregate(Sepal.Length ~ Species, data = iris, FUN = mean)
+ggplot(means, aes(x = Species, y = Sepal.Length,
+                  label = round(Sepal.Length, 2))) +
+  geom_text(size = 5)
+```
+
+## 11. geom_violin(): distribution shape by species
+
+```{r violin}
+ggplot(iris, aes(x = Species, y = Sepal.Length, fill = Species)) +
+  geom_violin()
+```
+
+## 12. geom_line(): line through the group means
+
+```{r line}
+ggplot(means, aes(x = Species, y = Sepal.Length, group = 1)) +
+  geom_line() +
+  geom_point()
+```
+
+## 13. geom_vline(): vertical reference line
+
+```{r vline}
+ggplot(iris, aes(x = Sepal.Length)) +
+  geom_histogram(binwidth = 0.3, fill = "green") +
+  geom_vline(xintercept = mean(iris$Sepal.Length), color = "red")
+```
+```
+

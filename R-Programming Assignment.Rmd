@@ -1,0 +1,197 @@
+---
+title: "R-Assignment"
+author: " SANGO Melissa"
+date: "`2026-10-21`"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE
+)
+
+```
+
+```{r}
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+install.packages(c("rmarkdown", "haven", "DBI", "RMariaDB", "jsonlite"))
+```
+
+
+```{r load_packages, message=FALSE, warning=FALSE}
+library(rmarkdown)
+library(haven)
+library(DBI)
+library(RMariaDB)
+library(jsonlite)
+
+```
+
+## R Markdown
+
+Importing Data from Statistical Software and Databases
+
+R allows users to import data from statistical software and databases. It provides various functions and packages for accessing, reading, and working with data from different sources.
+
+```{r install_packages2, eval=FALSE}
+install.packages("rmarkdown")
+library(rmarkdown)
+library(knitr)
+
+```
+
+
+## 1. Importing data from statistical packages
+
+```{r paths}
+library(haven)
+getwd()
+file_path <- "C:/Users/KABSTORE/Documents/R"
+
+```
+
+### Stata data
+
+```{r import_dta_data}
+data<- read_dta("household_survey.dta")
+View(data)
+head(data)
+
+```
+
+summary of stata file data
+
+```{r}
+summary(data)
+
+```
+
+### CSV file
+
+```{r import_csv_data}
+data_csv<-read.csv("student.csv")
+View(data_csv)
+```
+
+Get Top rows
+
+```{r top 6 rows in csv file}
+head(data_csv)
+
+```
+
+Summary of csv file
+
+```{r}
+summary(data_csv)
+```
+
+## 2. Importing data from a Database Management System (DBMS)
+
+A Database Management System (DBMS) organizes and stores structured data in tables. R can connect to a database, run SQL queries to retrieve specific information, and import the results into a data frame for analysis.
+
+Common examples of database management systems include:
+
+*MySQL
+* PostgreSQL 
+*Microsoft SQL Server
+* Oracle Database 
+*SQLite
+
+### Importing data from MySQL
+
+```{r import_MYSQL_data}
+library(DBI)
+library(RMariaDB)
+
+con <- dbConnect(RMariaDB::MariaDB(),
+                 host = "localhost",
+                 user = "root",
+                 password = "")
+
+```
+
+### create a small sample database
+
+```{r create_sample_db}
+dbExecute(con, "CREATE DATABASE IF NOT EXISTS PayrollDB")
+dbExecute(con, "USE PayrollDB")
+
+dbExecute(con, "DROP TABLE IF EXISTS employees")
+dbExecute(con, "DROP TABLE IF EXISTS departments")
+dbExecute(con, "DROP TABLE IF EXISTS positions")
+
+dbExecute(con, "CREATE TABLE departments (
+  DepartmentID INT PRIMARY KEY,
+  DepartmentName VARCHAR(50))")
+
+dbExecute(con, "CREATE TABLE positions (
+  PositionID INT PRIMARY KEY,
+  PositionName VARCHAR(50))")
+
+dbExecute(con, "CREATE TABLE employees (
+  EmployeeID INT PRIMARY KEY,
+  DepartmentID INT,
+  PositionID INT,
+  EmploymentDate DATE,
+  Status VARCHAR(20))")
+
+dbExecute(con, "INSERT INTO departments VALUES
+  (1,'Finance'),(2,'Human Resources'),(3,'IT')")
+
+dbExecute(con, "INSERT INTO positions VALUES
+  (1,'Accountant'),(2,'HR Officer'),(3,'Developer'),(4,'Manager')")
+
+dbExecute(con, "INSERT INTO employees VALUES
+  (101,1,1,'2022-03-15','Active'),
+  (102,2,2,'2021-07-01','Active'),
+  (103,3,3,'2023-01-10','Active'),
+  (104,3,4,'2020-05-20','Inactive'),
+  (105,1,4,'2019-11-02','Active'),
+  (106,2,2,'2024-02-12','Active')")
+```
+
+### Check the database was created
+
+```{r}
+Sys.setenv(MYSQL_PWD = "")
+
+con <- dbConnect(
+  RMariaDB::MariaDB(),
+  dbname   = "PayrollDB",
+  host     = "127.0.0.1",
+  port     = 3306,
+  user     = "root",
+  password = Sys.getenv("MYSQL_PWD")
+)
+
+employees <- dbGetQuery(con, "
+  SELECT e.EmployeeID, d.DepartmentName, p.PositionName,
+         e.EmploymentDate, e.Status
+  FROM payrolldb.employees e
+  JOIN payrolldb.positions p   ON p.PositionID   = e.PositionID
+  JOIN payrolldb.departments d ON d.DepartmentID = e.DepartmentID
+")
+
+dbDisconnect(con)
+head(employees)
+```
+
+### 3. Import data from a public API
+
+```{r API}
+library(jsonlite)
+users<-fromJSON("https://jsonplaceholder.typicode.com/users")
+dim(users)
+head(users)
+
+```
+
+```{r}
+View(users)
+```
