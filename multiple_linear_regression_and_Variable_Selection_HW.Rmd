@@ -1,0 +1,389 @@
+---
+title: "Multiple Linear Regression and Variable Selection"
+subtitle: "Predicting Fuel Efficiency of Cars (mtcars data)"
+author: "SANGO Melissa"
+date: "2026-11-09"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.align = "center", fig.width = 7, fig.height = 5)
+```
+
+# Introduction
+
+This assignment has two parts:
+
+1. **Fit a multiple linear regression (MLR) model** to a real data set and interpret the results.
+2. **Study variable selection methods** and apply them to decide which predictors should stay in the model.
+
+Multiple linear regression models a continuous response $Y$ as a linear function of several predictors $X_1, X_2, \dots, X_p$:
+
+$$
+Y = \beta_0 + \beta_1 X_1 + \beta_2 X_2 + \dots + \beta_p X_p + \varepsilon,
+\qquad \varepsilon \sim N(0, \sigma^2)
+$$
+
+Each coefficient $\beta_j$ measures the expected change in $Y$ for a one-unit increase in $X_j$, **holding all the other predictors constant**. The coefficients are estimated by ordinary least squares (OLS), which minimizes the residual sum of squares $RSS = \sum_{i=1}^{n}(y_i - \hat{y}_i)^2$.
+
+When many predictors are available, including all of them is not always the best choice. Some predictors add noise, some carry the same information as others (multicollinearity), and too many predictors relative to the sample size leads to overfitting. This is why variable selection matters, and it is the second focus of this report.
+
+# The Data Set
+
+I use the built-in `mtcars` data set, which comes from the 1974 *Motor Trend* US magazine. It contains fuel consumption and 10 design and performance characteristics for 32 car models.
+
+| Variable | Description | Type |
+|---|---|---|
+| `mpg` | Miles per US gallon (**response**) | Continuous |
+| `cyl` | Number of cylinders | Discrete |
+| `disp` | Engine displacement (cubic inches) | Continuous |
+| `hp` | Gross horsepower | Continuous |
+| `drat` | Rear axle ratio | Continuous |
+| `wt` | Weight (1000 lbs) | Continuous |
+| `qsec` | Quarter-mile time (seconds) | Continuous |
+| `vs` | Engine shape (0 = V-shaped, 1 = straight) | Categorical |
+| `am` | Transmission (0 = automatic, 1 = manual) | Categorical |
+| `gear` | Number of forward gears | Discrete |
+| `carb` | Number of carburetors | Discrete |
+
+**Research question:** Which car characteristics best explain fuel efficiency (`mpg`), and how strong are their effects?
+
+```{r load-data}
+data(mtcars)
+
+cars <- mtcars
+# Convert the two binary variables into labelled factors
+cars$am <- factor(cars$am, levels = c(0, 1), labels = c("Automatic", "Manual"))
+cars$vs <- factor(cars$vs, levels = c(0, 1), labels = c("V-shaped", "Straight"))
+
+str(cars)
+summary(cars)
+```
+
+The data set has `r nrow(cars)` observations, `r ncol(cars) - 1` candidate predictors and no missing values (`r sum(is.na(cars))` missing cells).
+
+# Exploratory Data Analysis
+
+## Correlation with the response
+
+```{r correlation}
+round(cor(mtcars)[, "mpg"], 2)
+```
+
+```{r corr-matrix}
+round(cor(mtcars), 2)
+```
+
+**Interpretation:**
+
+- `mpg` is strongly and **negatively** correlated with `wt` (−0.87), `cyl` (−0.85), `disp` (−0.85) and `hp` (−0.78): heavier cars with bigger, more powerful engines use more fuel.
+- `mpg` is **positively** correlated with `drat` (0.68), `vs` (0.66) and `am` (0.60).
+- Several predictors are also strongly correlated **with each other** (for example `cyl`, `disp`, `hp` and `wt` all measure engine/car size). This is an early warning of **multicollinearity**.
+
+## Visual exploration
+
+```{r pairs-plot, fig.width=8, fig.height=7}
+pairs(mtcars[, c("mpg", "wt", "cyl", "hp", "qsec", "am")],
+      pch = 19, col = "steelblue", cex = 0.7,
+      main = "Scatterplot matrix of selected variables")
+```
+
+```{r boxplot-am}
+boxplot(mpg ~ am, data = cars, col = c("tomato", "skyblue"),
+        ylab = "Miles per gallon", xlab = "Transmission",
+        main = "Fuel efficiency by transmission type")
+```
+
+The scatterplots show roughly linear relationships between `mpg` and `wt`, `hp` and `cyl`. Manual cars have higher `mpg` on average, but manual cars in this sample are also lighter, so part of this difference may be due to weight rather than the transmission itself. Multiple regression lets us separate these effects.
+
+# Part 1: Multiple Linear Regression
+
+## Full model (all 10 predictors)
+
+```{r full-model}
+full_model <- lm(mpg ~ ., data = cars)
+summary(full_model)
+```
+
+### Interpretation of the full model
+
+- **Overall fit:** $R^2 = 0.869$, so the 10 predictors together explain about 87% of the variation in `mpg`. The adjusted $R^2$ is lower (0.807) because it penalizes the number of predictors.
+- **Overall F-test:** $F = 13.93$ on 10 and 21 df, $p < 0.001$. We reject $H_0: \beta_1 = \dots = \beta_{10} = 0$; at least one predictor is related to `mpg`.
+- **Individual t-tests:** surprisingly, **no single predictor is significant at the 5% level**. Even `wt`, the variable most correlated with `mpg`, has $p = 0.063$.
+
+A model that is significant overall but has no significant individual predictors is a classic symptom of **multicollinearity**: the predictors share so much information that the model cannot tell which one deserves the credit, so the standard errors become inflated.
+
+## Checking multicollinearity (VIF)
+
+The Variance Inflation Factor measures how much the variance of a coefficient is inflated because of correlation with the other predictors. A common rule of thumb is that VIF > 5 (or > 10) signals a problem.
+
+```{r vif-full}
+library(car)
+round(vif(full_model), 2)
+```
+
+`disp` (21.6), `cyl` (15.4) and `wt` (15.2) have very high VIFs, and several others exceed 5. This confirms that the full model contains redundant predictors and motivates variable selection.
+
+# Part 2: Variable Selection Methods
+
+## Why select variables?
+
+- **Parsimony:** a simpler model is easier to interpret and explain.
+- **Better prediction:** removing noise variables reduces the variance of predictions and the risk of overfitting. With only 32 cars, 10 predictors leaves just 21 residual degrees of freedom.
+- **Reduce multicollinearity:** keeping one of several redundant predictors stabilizes the coefficients.
+
+## Criteria used to compare models
+
+A model with more predictors always has a lower RSS and a higher $R^2$, so we need criteria that **penalize complexity**:
+
+| Criterion | Formula (idea) | Better model |
+|---|---|---|
+| Adjusted $R^2$ | $1 - \frac{RSS/(n-p-1)}{TSS/(n-1)}$ | Larger |
+| Mallows' $C_p$ | $\frac{1}{n}(RSS + 2p\hat{\sigma}^2)$; good models have $C_p \approx p$ | Smaller |
+| AIC | $n\ln(RSS/n) + 2p$ | Smaller |
+| BIC | $n\ln(RSS/n) + p\ln(n)$ | Smaller |
+| Cross-validation error | Average prediction error on held-out data | Smaller |
+
+BIC uses a heavier penalty than AIC when $n \geq 8$, so it tends to choose smaller models.
+
+## Overview of the methods
+
+1. **Best subset selection:** fits all $2^p$ possible models and picks the best one of each size, then compares sizes with a criterion. It is exhaustive but becomes infeasible when $p$ is large ($2^{10} = 1024$ models here, which is fine).
+2. **Forward selection:** starts with no predictors and adds, one at a time, the predictor that most improves the criterion. It stops when no addition helps.
+3. **Backward elimination:** starts with all predictors and removes, one at a time, the least useful predictor. It requires $n > p$.
+4. **Stepwise (both directions):** like forward selection, but at each step a previously added variable can also be removed.
+5. **Shrinkage / regularization (LASSO):** adds a penalty $\lambda \sum |\beta_j|$ to the least-squares objective. This shrinks coefficients towards zero and sets some **exactly** to zero, so selection happens during estimation. $\lambda$ is chosen by cross-validation.
+
+Stepwise methods are greedy: they do not search every combination, so **different methods can end up with different models**. We will see this below.
+
+## Best subset selection
+
+```{r best-subset}
+library(leaps)
+best_sub <- regsubsets(mpg ~ ., data = cars, nvmax = 10)
+best_sum <- summary(best_sub)
+
+# Which variables are in the best model of each size?
+best_sum$outmat
+
+# Criteria for each model size
+data.frame(
+  Size   = 1:10,
+  Adj_R2 = round(best_sum$adjr2, 3),
+  Cp     = round(best_sum$cp, 2),
+  BIC    = round(best_sum$bic, 2)
+)
+```
+
+```{r best-subset-plot, fig.width=9, fig.height=3.5}
+par(mfrow = c(1, 3))
+plot(best_sum$adjr2, type = "b", pch = 19, xlab = "Number of predictors",
+     ylab = "Adjusted R-squared", main = "Adjusted R²")
+points(which.max(best_sum$adjr2), max(best_sum$adjr2), col = "red", pch = 19, cex = 2)
+
+plot(best_sum$cp, type = "b", pch = 19, xlab = "Number of predictors",
+     ylab = "Cp", main = "Mallows' Cp")
+points(which.min(best_sum$cp), min(best_sum$cp), col = "red", pch = 19, cex = 2)
+
+plot(best_sum$bic, type = "b", pch = 19, xlab = "Number of predictors",
+     ylab = "BIC", main = "BIC")
+points(which.min(best_sum$bic), min(best_sum$bic), col = "red", pch = 19, cex = 2)
+par(mfrow = c(1, 1))
+```
+
+**Interpretation:**
+
+- **$C_p$ and BIC** both choose the **3-predictor model: `wt`, `qsec` and `am`**.
+- **Adjusted $R^2$** is highest at 5 predictors (0.838), but the gain over the 3-predictor model (0.834) is tiny. Since adjusted $R^2$ uses the weakest penalty, it tends to favour slightly larger models.
+- After about 3 predictors the curves are flat, so extra variables add almost nothing.
+
+## Forward, backward and stepwise selection (AIC)
+
+```{r stepwise}
+null_model <- lm(mpg ~ 1, data = cars)
+
+forward  <- step(null_model, scope = formula(full_model),
+                 direction = "forward", trace = 0)
+backward <- step(full_model, direction = "backward", trace = 0)
+both     <- step(null_model, scope = formula(full_model),
+                 direction = "both", trace = 0)
+
+formula(forward)
+formula(backward)
+formula(both)
+```
+
+**Interpretation:**
+
+- **Backward elimination** arrives at `mpg ~ wt + qsec + am`, the same model chosen by best subset.
+- **Forward and stepwise selection** (starting from the empty model) arrive at a different model: `mpg ~ wt + cyl + hp`.
+
+This happens because forward selection first adds `wt` (the strongest single predictor), then `cyl`, which is the best *second* variable. Once `cyl` is in, the path to `qsec + am` is closed, because `qsec` and `am` are only useful **together** with `wt`. This illustrates a key weakness of greedy methods: they can miss the best combination.
+
+## LASSO regression
+
+```{r lasso, fig.width=9, fig.height=4}
+library(glmnet)
+
+x <- model.matrix(mpg ~ ., data = cars)[, -1]  # predictor matrix (no intercept)
+y <- cars$mpg
+
+set.seed(2026)
+cv_lasso <- cv.glmnet(x, y, alpha = 1, nfolds = 10)
+
+par(mfrow = c(1, 2))
+plot(cv_lasso)
+plot(cv_lasso$glmnet.fit, xvar = "lambda", label = TRUE)
+par(mfrow = c(1, 1))
+
+lasso_coef <- coef(cv_lasso, s = "lambda.1se")
+lasso_coef
+```
+
+```{r lasso-selected}
+selected_lasso <- rownames(lasso_coef)[lasso_coef[, 1] != 0][-1]
+selected_lasso
+```
+
+**Interpretation:**
+
+The left plot shows the cross-validated error for each value of $\lambda$. Using the "one-standard-error" rule (the largest $\lambda$ whose error is within one standard error of the minimum), LASSO keeps **`r paste(selected_lasso, collapse = ", ")`** and shrinks all other coefficients to exactly zero. The right plot shows how coefficients shrink to zero as $\lambda$ increases.
+
+LASSO agrees with forward selection that `wt`, `cyl` and `hp` carry the main signal. When predictors are highly correlated, LASSO tends to keep one of the group and drop the rest, which is why `disp` (correlated with `cyl` and `wt`) is dropped.
+
+## Comparing the candidate models
+
+Three different methods produced two competing 3-predictor models. To choose between them, I compare information criteria and the **leave-one-out cross-validation (LOOCV)** prediction error, which estimates how well each model predicts a car it has not seen.
+
+```{r compare-models}
+model_A <- lm(mpg ~ wt + qsec + am, data = cars)   # best subset / backward
+model_B <- lm(mpg ~ wt + cyl + hp,  data = cars)   # forward / stepwise / LASSO
+
+# LOOCV for a linear model using the hat-matrix shortcut
+loocv_rmse <- function(model) {
+  h <- hatvalues(model)
+  sqrt(mean((residuals(model) / (1 - h))^2))
+}
+
+comparison <- data.frame(
+  Model      = c("Full (10 predictors)", "A: wt + qsec + am", "B: wt + cyl + hp"),
+  Predictors = c(10, 3, 3),
+  Adj_R2     = sapply(list(full_model, model_A, model_B),
+                      function(m) round(summary(m)$adj.r.squared, 3)),
+  AIC        = round(AIC(full_model, model_A, model_B)$AIC, 2),
+  BIC        = round(BIC(full_model, model_A, model_B)$BIC, 2),
+  LOOCV_RMSE = sapply(list(full_model, model_A, model_B),
+                      function(m) round(loocv_rmse(m), 3))
+)
+comparison
+```
+
+```{r partial-f-test}
+# Does the full model fit significantly better than Model A?
+anova(model_A, full_model)
+```
+
+**Interpretation:**
+
+- **Model A** (`wt + qsec + am`) has the highest adjusted $R^2$ and the lowest AIC and BIC of the three models.
+- Both reduced models predict new observations much better than the full model (LOOCV error of about 2.7 mpg versus 3.5 mpg), which confirms that the full model **overfits**.
+- Models A and B have practically the same LOOCV error (2.69 vs 2.68), so prediction accuracy alone cannot separate them. The tie is broken by AIC, BIC and adjusted $R^2$, which all favour Model A.
+- The **partial F-test** compares Model A with the full model. The p-value is `r round(anova(model_A, full_model)$"Pr(>F)"[2], 3)`, so the 7 extra predictors do **not** significantly improve the fit. We keep the simpler model.
+
+Model A is selected as the final model. It is also easy to interpret, because its three predictors describe different aspects of a car (weight, performance and transmission) rather than overlapping measures of engine size.
+
+# Final Model
+
+```{r final-model}
+final_model <- model_A
+summary(final_model)
+round(confint(final_model), 3)
+round(vif(final_model), 2)
+```
+
+The fitted equation is:
+
+$$
+\widehat{mpg} = 9.62 - 3.92\,(wt) + 1.23\,(qsec) + 2.94\,(am_{Manual})
+$$
+
+## Interpretation of the coefficients
+
+- **Weight (`wt`)**: holding quarter-mile time and transmission constant, each additional **1000 lbs** of weight lowers fuel efficiency by about **3.92 mpg** on average (95% CI: −5.37 to −2.46). This is the strongest effect ($p < 0.001$).
+- **Quarter-mile time (`qsec`)**: holding weight and transmission constant, each additional **second** needed to cover a quarter mile raises fuel efficiency by about **1.23 mpg** (95% CI: 0.63 to 1.82, $p < 0.001$). Slower-accelerating cars have less powerful engines and so use less fuel. `qsec` acts as a proxy for engine power.
+- **Transmission (`am`)**: for cars of the same weight and quarter-mile time, a manual transmission is associated with about **2.94 mpg more** than an automatic one (95% CI: 0.05 to 5.83, $p = 0.047$). The effect is significant, but the wide confidence interval shows it is estimated with considerable uncertainty.
+- **Intercept (9.62)**: the predicted mpg for an automatic car with zero weight and zero quarter-mile time. This is outside the range of the data and has no practical meaning; it only positions the regression plane.
+
+## Overall model fit
+
+- $R^2 = 0.850$: the three predictors explain about **85%** of the variability in fuel efficiency, almost as much as all 10 predictors (86.9%).
+- Adjusted $R^2 = 0.834$, **higher** than the full model (0.807), because we removed predictors that added complexity without explanatory power.
+- Residual standard error = 2.46 mpg: a typical prediction misses the actual mpg by about 2.5 miles per gallon.
+- F-statistic = 52.75 on 3 and 28 df, $p < 0.001$: the model as a whole is highly significant.
+- All VIFs are below 3, so **multicollinearity is no longer a concern**.
+
+# Checking the Model Assumptions
+
+The conclusions above are valid only if the regression assumptions hold: linearity, independence, constant variance (homoscedasticity) and normality of the errors.
+
+```{r diagnostics, fig.width=8, fig.height=7}
+par(mfrow = c(2, 2))
+plot(final_model)
+par(mfrow = c(1, 1))
+```
+
+```{r assumption-tests}
+# Normality of residuals
+shapiro.test(residuals(final_model))
+
+# Constant variance
+ncvTest(final_model)
+```
+
+**Interpretation:**
+
+- **Linearity:** the Residuals vs Fitted plot shows a slight curve, but no strong pattern. The linear form is a reasonable approximation.
+- **Normality:** the Q-Q plot follows the line fairly well, apart from a few cars in the upper tail. The Shapiro-Wilk test gives $p = 0.080 > 0.05$, so we do not reject normality.
+- **Constant variance:** the Scale-Location plot is fairly flat and the non-constant variance test gives $p = 0.212$, so there is no evidence of heteroscedasticity.
+- **Influential points:** in the Residuals vs Leverage plot no observation falls beyond Cook's distance of 1. A few cars (such as the Chrysler Imperial and Fiat 128) have larger residuals, but none dominates the fit.
+
+Overall, the assumptions are reasonably satisfied.
+
+## Example prediction
+
+```{r prediction}
+new_car <- data.frame(wt = 3.0, qsec = 18,
+                      am = factor("Manual", levels = c("Automatic", "Manual")))
+predict(final_model, newdata = new_car, interval = "prediction")
+```
+
+A manual car weighing 3000 lbs with a quarter-mile time of 18 seconds is predicted to achieve about **23 mpg**. The 95% prediction interval shows the range in which the mpg of an individual car with these characteristics is expected to fall.
+
+# Discussion and Limitations
+
+- **Different methods, different answers.** Best subset and backward elimination chose `wt + qsec + am`, while forward selection, stepwise selection and LASSO chose `wt + cyl + hp`. Both models fit well. Variable selection is a tool to support judgement, not an automatic way to find the "true" model.
+- **Small sample.** With only 32 cars, the estimates (especially the transmission effect) are uncertain, and the selected model could change with a different sample.
+- **Inference after selection.** p-values and confidence intervals computed on the same data used to select the variables tend to be too optimistic. Ideally, selection should be validated on new data.
+- **Association, not causation.** These are observational data from 1974. The model shows associations; it does not prove that, for example, switching to a manual gearbox would by itself raise a car's mpg.
+- **Age of the data.** Car technology has changed a lot since 1974, so the results should not be generalized to modern cars.
+
+# Conclusion
+
+A multiple linear regression model was fitted to predict fuel efficiency from 10 car characteristics. The full model explained 87% of the variation in mpg, but no individual predictor was significant because of strong multicollinearity.
+
+Several variable selection methods were then applied. Best subset selection (using $C_p$ and BIC) and backward elimination selected the model with **weight, quarter-mile time and transmission type**. This model explains 85% of the variation with only 3 predictors, has the best AIC and BIC, predicts new cars better than the full model, has no multicollinearity problem, and satisfies the regression assumptions.
+
+The main finding is that **weight is the most important driver of fuel consumption**: each extra 1000 lbs costs about 4 mpg. Cars with less powerful engines (longer quarter-mile times) and manual transmissions are also more fuel efficient, after accounting for weight.
+
+# References
+
+1. James, G., Witten, D., Hastie, T., & Tibshirani, R. (2021). *An Introduction to Statistical Learning: With Applications in R* (2nd ed.). Springer. (Chapter 3: Linear Regression; Chapter 6: Linear Model Selection and Regularization.)
+2. Kutner, M. H., Nachtsheim, C. J., Neter, J., & Li, W. (2005). *Applied Linear Statistical Models* (5th ed.). McGraw-Hill.
+3. Tibshirani, R. (1996). Regression Shrinkage and Selection via the Lasso. *Journal of the Royal Statistical Society, Series B*, 58(1), 267–288.
+4. Fox, J., & Weisberg, S. (2019). *An R Companion to Applied Regression* (3rd ed.). Sage.
+5. Henderson, H. V., & Velleman, P. F. (1981). Building Multiple Regression Models Interactively. *Biometrics*, 37, 391–411. (Original source of the `mtcars` data.)
